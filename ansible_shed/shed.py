@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
 import asyncio
-import logging
-import re
-from git import Git, Repo
-from configparser import ConfigParser
 from collections import defaultdict
+from configparser import ConfigParser
+from git import Git, Repo
 from json import dumps
+import logging
 from pathlib import Path
 from random import randint
+import re
+import shutil
 from subprocess import CompletedProcess, PIPE, run
 from time import time
 from typing import Dict
@@ -40,6 +41,10 @@ class Shed:
 
     def reload_config_vars(self) -> None:
         self.repo_path = Path(self.config[SHED_CONFIG_SECTION].get("repo_path"))
+        self.init_file = (
+            Path(self.config[SHED_CONFIG_SECTION]["repo_path"])
+            / self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"]
+        )
         self.repo_url = self.config[SHED_CONFIG_SECTION].get("repo_url")
         self.run_interval_seconds = (
             self.config[SHED_CONFIG_SECTION].getint("interval") * 60
@@ -47,7 +52,7 @@ class Shed:
         self.stats_port = self.config[SHED_CONFIG_SECTION].getint("port")
 
     def _rebase_or_clone_repo(self) -> None:
-        if self.repo_path.exists():
+        if self.init_file.exists():
             LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
             git_ssh_cmd = f"ssh -o StrictHostKeyChecking=no -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
             with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
@@ -55,6 +60,13 @@ class Shed:
                 repo.remotes.origin.fetch()
                 repo.remotes.origin.refs.master.checkout()
             return
+
+        # if we are at the point where init doesn't exist, git failed in the first pass
+        # clear house and start again. Never hurts to start clean.
+        if self.repo_path.exists():
+            LOG.info(f"Repo is corrupted, re-cloning")
+            # must use shutil because rmdir requires empty directory which is not guaranteed
+            shutil.rmtree(self.repo_path)
 
         self.repo_path.mkdir(parents=True)
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
