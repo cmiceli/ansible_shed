@@ -52,11 +52,11 @@ class Shed:
         self.stats_port = self.config[SHED_CONFIG_SECTION].getint("port")
 
     def _rebase_or_clone_repo(self) -> None:
+        git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
         if self.init_file.exists():
             LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
-            git_ssh_cmd = f"ssh -o StrictHostKeyChecking=no -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
-            with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
-                repo = Repo(self.repo_path)
+            repo = Repo(self.repo_path)
+            with repo.git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
                 repo.remotes.origin.fetch()
                 repo.remotes.origin.refs.master.checkout()
             return
@@ -71,9 +71,12 @@ class Shed:
         self.repo_path.mkdir(parents=True)
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
 
-        git_ssh_cmd = f"ssh -o StrictHostKeyChecking=no -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
-        with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
-            Repo.clone_from(self.repo_url, self.repo_path, branch="master")
+        Repo.clone_from(
+            self.repo_url,
+            self.repo_path,
+            env={"GIT_SSH_COMMAND": git_ssh_command},
+            branch="master",
+        )
 
     def _run_ansible(self) -> CompletedProcess:
         """Run ansible-playbook and parse out statistics for prometheus"""
